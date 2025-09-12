@@ -85,7 +85,35 @@ class PingSynthExplorerPedal final : public EffectBase
     {
         m_ping.setRandomPower(value * 0.01f);
     }
-    void setUser10(const float value) {}
+
+    void setUser10(const float value)
+    {
+        m_ping.setDecaySkew(value * 0.01f);
+    }
+    void setUser11(const float value)
+    {
+        m_ping.setExcitationNoise(value * 0.01f);
+    }
+
+    void setUser12(const float value)
+    {
+        m_ping.setSparkleTime(value);
+    }
+
+    void setUser13(const float value)
+    {
+        m_ping.setSparkleRandom(value * 0.01f);
+    }
+
+    void setUser14(const float value)
+    {
+        m_ping.setMinOvertones(value);
+    }
+
+    void setUser15(const float value)
+    {
+        m_ping.setMaxOvertones(value);
+    }
 
     [[maybe_unused]] void processMidi(const uint8_t* msg) override
     {

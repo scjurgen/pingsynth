@@ -1,9 +1,10 @@
 #pragma once
 
-#include <cmath>
-#include <numbers>
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <numbers>
+#include <numeric>
 
 class BiquadBandPass
 {
@@ -32,12 +33,25 @@ class BiquadBandPass
         computeCoefficients(frequency, Q);
     }
 
-    void computeCoefficients(const float frequency, const float Q = 1.f / std::numbers::sqrt2) noexcept
+    void setDecay(const float t)
     {
-        const auto Fc = frequency / m_sampleRate;
-        const auto K = std::tan(std::numbers::pi_v<float> * Fc);
+        constexpr auto k = 0.1447648273f; // 1.f / std::log(1000.f); //  1/6.9078f
+        const float Q = std::numbers::pi_v<float> * m_frequency * t * k;
         const auto kqCl = K / std::max(Q, 0.01f);
-        const auto kSquare = K * K;
+        const auto norm = 1.f / (1 + kqCl + kSquare);
+        m_b0 = kqCl * norm;
+        m_a1 = 2 * (kSquare - 1) * norm;
+        m_a2 = (1 - kqCl + kSquare) * norm;
+    }
+
+    void computeCoefficients(const float frequency, const float Q = 1.f / std::numbers::sqrt2_v<float>) noexcept
+    {
+        m_frequency = frequency;
+        Fc = frequency / m_sampleRate;
+        K = std::tan(std::numbers::pi_v<float> * Fc);
+        kSquare = K * K;
+
+        const auto kqCl = K / std::max(Q, 0.01f);
         const auto norm = 1.f / (1 + kqCl + kSquare);
         m_b0 = kqCl * norm;
         m_a1 = 2 * (kSquare - 1) * norm;
@@ -74,7 +88,25 @@ class BiquadBandPass
         return db;
     }
 
+    bool isActive() noexcept
+    {
+        if (std::abs(m_z[0]) > 1E-5f || std::abs(m_z[1]) > 1E-5f)
+        {
+            m_inActiveCount = 0;
+        }
+        else
+        {
+            m_inActiveCount++;
+        }
+        return m_inActiveCount < 32;
+    }
+
   private:
+    int m_inActiveCount{0};
     float m_b0{0.f}, m_a1{0.f}, m_a2{0.f};
     std::array<float, 2> m_z{};
+    float m_frequency;
+    float Fc;
+    float K;
+    float kSquare;
 };

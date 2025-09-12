@@ -24,5 +24,7 @@ mark_as_advanced(
 )
 
 package_add_test(PluginTests
+        BiquadExcitation_test.cpp
+        Excitation_test.cpp
         Pingsynth_tests.cpp
 )

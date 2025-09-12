@@ -1,136 +1,204 @@
 #pragma once
-/*
- * TODO:
- *   - different trigger kernels with interpolation for frequency dependency
- */
-#include <array>
-#include <cmath>
-#include <numbers>
-#include <random>
 
-#include "Biquad.h"
+#include <array>
+#include <memory>
+#include <random>
+#include <numbers>
+#include <functional>
+
+#include "BiquadBandPass.h"
+#include "PingHarmonics.h"
+#include "PingSpread.h"
+#include "ResoGenerator.h"
 
 template <size_t BlockSize>
 class PingSynth
 {
-    static constexpr int minMidiNote{21};  // A-1
-    static constexpr int maxMidiNote{120}; // C8
-#ifdef NDEBUG
-    static constexpr int stepsPerSemitone{77};
-#else
-    static constexpr int stepsPerSemitone{11};
-#endif
-    static constexpr size_t NumElements{(maxMidiNote - minMidiNote) * stepsPerSemitone + 1};
+    static constexpr int minMidiNote{21};
+    static constexpr int maxMidiNote{132};
+    static constexpr int range{maxMidiNote - minMidiNote};
+    static constexpr int stepsPerSemitone{33};
+
+    static constexpr size_t NumElements{range * (stepsPerSemitone) + 1};
 
   public:
     explicit PingSynth(const float sampleRate)
         : m_sampleRate(sampleRate)
+        , m_triggerCallback(
+              [this](const size_t index, const float power, float order)
+              {
+                  size_t wait = 0;
+                  if (m_sparkleRandom == 0.f || order == 0.f)
+                  {
+                      if (m_sparkleTimeBlocks < 0)
+                      {
+                          wait = static_cast<size_t>((1 - order) * -m_sparkleTimeBlocks);
+                      }
+                      else
+                      {
+                          wait = static_cast<size_t>(order * m_sparkleTimeBlocks);
+                      }
+                  }
+                  else
+                  {
+                      std::uniform_real_distribution dist(0.f, 1.f);
+                      const auto u = dist(m_randomGenerator);
+                      if (m_sparkleTimeBlocks >= 0)
+                      {
+                          const auto interpolatedValue = (1.f - m_sparkleRandom) * order + m_sparkleRandom * u;
+                          wait = static_cast<size_t>(interpolatedValue * m_sparkleTimeBlocks);
+                      }
+                      else
+                      {
+                          const auto interpolatedValue = (1.f - m_sparkleRandom) * (1 - order) + m_sparkleRandom * u;
+                          wait = static_cast<size_t>(interpolatedValue * -m_sparkleTimeBlocks);
+                      }
+                  }
+                  m_resoEngine.triggerNew(index, power, wait);
+              })
+        , m_getFrequencyIndexFunc(
+              [this](const float targetFreq) -> size_t
+              {
+                  const auto baseFrequency = 440.0f * std::pow(2.0f, static_cast<float>(minMidiNote - 69) / 12.0f);
+                  constexpr auto slotsPerOctave = static_cast<float>(stepsPerSemitone) * 12.0f;
+                  const auto exactIndex = std::log2(targetFreq / baseFrequency) * slotsPerOctave;
+                  const auto roundedIndex = static_cast<size_t>(std::round(exactIndex));
+                  return std::clamp(roundedIndex, size_t{0}, m_frequencies.size() - 1);
+              })
+        , m_getRandomnessFunc(
+              [this]() -> float
+              {
+                  std::uniform_real_distribution<float> uniform(0.0f, 1.0f);
+                  const auto u1 = uniform(m_randomGenerator);
+                  const auto u2 = uniform(m_randomGenerator);
+                  const auto gaussian =
+                      std::sqrt(-2.0f * std::log(u1)) * std::cos(2.0f * std::numbers::pi_v<float> * u2);
+                  return std::clamp(gaussian * 0.3f, -1.0f, 1.0f);
+              })
+        , m_spreadCallback(
+              [this](const size_t index, const float power)
+              {
+                  if (m_spreadGenerator)
+                  {
+                      m_spreadGenerator->generateSpreads(index, power);
+                  }
+              })
+        , m_resoEngine(sampleRate, minMidiNote, stepsPerSemitone)
     {
-        fillFrequencyTable();
-        createSincFeed();
-        for (auto& f : m_bq)
-        {
-            f.setSampleRate(sampleRate);
-        }
-        assignFrequencyAndDecay();
-    }
+        m_frequencies = m_resoEngine.getFrequencies();
 
+        m_spreadGenerator = std::make_unique<PingSpread<NumElements, stepsPerSemitone>>(
+            m_frequencies, m_getFrequencyIndexFunc, m_getRandomnessFunc, m_triggerCallback);
+
+        m_oddGenerator = std::make_unique<OddHarmonicGenerator<NumElements>>(
+            m_frequencies, m_getFrequencyIndexFunc, m_getRandomnessFunc, m_currentVelocity, m_randomPower,
+            m_triggerCallback, m_spreadCallback);
+
+        m_evenGenerator = std::make_unique<EvenHarmonicGenerator<NumElements>>(
+            m_frequencies, m_getFrequencyIndexFunc, m_getRandomnessFunc, m_currentVelocity, m_randomPower,
+            m_triggerCallback, m_spreadCallback);
+
+        m_stretchedGenerator = std::make_unique<StretchedHarmonicGenerator<NumElements>>(
+            m_frequencies, m_getFrequencyIndexFunc, m_getRandomnessFunc, m_currentVelocity, m_randomPower,
+            m_triggerCallback, m_spreadCallback);
+    }
 
     void setDecay(const float decay) noexcept
     {
         m_decay = decay;
-        assignFrequencyAndDecay();
+        m_resoEngine.setDecay(decay);
     }
 
-    // spread triggers to nearby slots
-    void setSpread(const float fdbk) noexcept
+    void setDecaySkew(const float value) noexcept
     {
-        m_spread = fdbk;
+        m_resoEngine.setDecaySkew(value);
     }
-    // spread triggers to overtones odd position, i.e. *3 *5 *7 *9
+
+    void setSpread(const float spread) noexcept
+    {
+        m_spreadGenerator->setSpread(spread);
+    }
+
     void setOddsOvertones(const float value) noexcept
     {
-        m_odds = value;
+        m_oddGenerator->setOdds(value);
     }
-    // spread triggers to overtones even position, i.e. *2 *4 *6 *8
+
     void setEvenOvertones(const float value) noexcept
     {
-        m_evens = value;
+        m_evenGenerator->setEvens(value);
     }
+
     void setStretchedOvertones(const float value) noexcept
     {
-        m_stretched = value;
+        m_stretchedGenerator->setStretched(value);
     }
-    // apply a skew to the factor used by Even and Off overtones, e.g.
-    // at value = 0 the even overtones are 2,4,6,8
-    // with value=-0.152 the overtones are 1.8, 3.6, 5.4, 7.2 (2^-0.152)
+
     void setSkewOddOvertones(const float value)
     {
-        m_skewOdds = std::pow(2, value);
+        m_oddGenerator->setSkewOdds(value);
     }
+
     void setSkewEvenOvertones(const float value)
     {
-        m_skewEvens = std::pow(2, value);
+        m_evenGenerator->setSkewEvens(value);
     }
 
     void setRandomSpread(const float value)
     {
-        m_randomSpread = value;
+        m_spreadGenerator->setRandomSpread(value);
     }
 
     void setRandomPower(const float value)
     {
         m_randomPower = value;
+        m_spreadGenerator->setRandomPower(value);
     }
 
-    void addSpreads(const size_t index, const float power)
+    void setExcitationNoise(const float value)
     {
-        if (m_spread <= 0.0f)
-        {
-            return;
-        }
-        const float sigma = m_spread * 6.0f;
-        const float twoSigmaSquared = 2.0f * sigma * sigma;
+        m_resoEngine.setExcitationNoise(value);
+    }
 
-        // Calculate maximum distance based on spread
-        const int maxDistance = static_cast<int>(m_spread * 10) + 1;
+    void setSparkleTime(const float ms)
+    {
+        m_sparkleTimeBlocks = static_cast<int>(ms * 0.001f * m_sampleRate / BlockSize);
+    }
 
-        for (int i = 1; i <= maxDistance; ++i)
-        {
-            const auto offset = (i % 2) == 1 ? (i + 1) >> 1 : -(i >> 1); // alternate left and right
+    void setSparkleRandom(const float value)
+    {
+        m_sparkleRandom = value;
+    }
 
-            // Calculate Gaussian power based on distance
-            const auto distance = static_cast<float>(std::abs(offset));
-            const auto gaussianPower = std::exp(-(distance * distance) / twoSigmaSquared);
-            const auto adjustedPower = power * gaussianPower;
+    void setMinOvertones(const int overtones)
+    {
+        m_overtoneCount.first = overtones;
+        m_oddGenerator->setMinMaxOvertone(m_overtoneCount);
+        m_evenGenerator->setMinMaxOvertone(m_overtoneCount);
+        m_stretchedGenerator->setMinMaxOvertone(m_overtoneCount);
+    }
 
-            if (adjustedPower < 1.f)
-            {
-                break;
-            }
-            const auto targetIndex = static_cast<int>(index) + offset * stepsPerSemitone / 10;
-            triggerSingleSlot(targetIndex, adjustedPower);
-        }
+    void setMaxOvertones(const int overtones)
+    {
+        m_overtoneCount.second = overtones;
+        m_oddGenerator->setMinMaxOvertone(m_overtoneCount);
+        m_evenGenerator->setMinMaxOvertone(m_overtoneCount);
+        m_stretchedGenerator->setMinMaxOvertone(m_overtoneCount);
     }
 
     void triggerSingleSlot(const size_t index, const float power) noexcept
     {
-        if (index < m_triggerGain.size())
-        {
-            m_triggerGain[index] = power;
-            m_trigger[index] = m_triggerPattern.size();
-        }
+        m_triggerCallback(index, power, 0);
     }
 
     void triggerSlots(const size_t index, const float power) noexcept
     {
         triggerSingleSlot(index, power);
-        addSpreads(index, power);
-        addOdds(index, power);
-        addEvens(index, power);
-        addStretched(index, power);
+        m_spreadGenerator->generateSpreads(index, power);
+        m_oddGenerator->generateHarmonics(index, power);
+        m_evenGenerator->generateHarmonics(index, power);
+        m_stretchedGenerator->generateHarmonics(index, power);
     }
-
 
     void triggerVoice(const size_t height, const float velocity) noexcept
     {
@@ -138,259 +206,71 @@ class PingSynth
         {
             return;
         }
-        const size_t relHeight = height - minMidiNote;
-        size_t baseIdx = relHeight * stepsPerSemitone;
-        triggerSlots(baseIdx, velocity * 180.f * (m_decay + 0.01f));
-        // triggerSlots(baseIdx + 7 * stepsPerSemitone, velocity * 40.f * m_decay);
-        // triggerSlots(baseIdx - 5 * stepsPerSemitone, velocity * 40.f * m_decay);
+        m_countVoices++;
+        const auto relHeight = height - minMidiNote;
+        const auto baseIdx = relHeight * stepsPerSemitone;
+        const auto power = velocity * 20.f * (m_decay + 0.01f);
+        m_currentVelocity = velocity;
+        triggerSlots(baseIdx, power);
     }
 
-    void stopVoice(const size_t height, const float velocity) noexcept {}
+    void stopVoice(const size_t height, const float /*velocity*/) noexcept
+    {
+        if (height < minMidiNote || height > maxMidiNote)
+        {
+            return;
+        }
+        m_countVoices--;
+        if (m_countVoices == 0)
+        {
+        }
+    }
 
     void processBlock(std::array<float, BlockSize>& out) noexcept
     {
-        for (size_t i = 0; i < BlockSize; ++i)
-        {
-            float sum{0.f};
-            for (size_t j = 0; j < m_bq.size(); ++j)
-            {
-                if (m_trigger[j])
-                {
-                    m_trigger[j]--;
-                    sum += m_bq[j].step(m_triggerGain[j] * m_triggerPattern[m_trigger[j]]);
-                }
-                else
-                {
-                    sum += m_bq[j].step(0.f);
-                }
-            }
-            out[i] = sum;
-        }
+        m_resoEngine.processBlock(out);
     }
 
   private:
-    void createWhiteNoiseBurst()
+    float getHumanRandomness() const noexcept
     {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_real_distribution<float> distribution(0.f, 1.0f);
-
-        std::generate(m_triggerPattern.begin(), m_triggerPattern.end(),
-                      [&]() mutable
-                      {
-                          const float white = distribution(gen);
-                          return white;
-                      });
+        std::uniform_real_distribution<float> uniform(0.0f, 1.0f);
+        const auto u1 = uniform(m_randomGenerator);
+        const auto u2 = uniform(m_randomGenerator);
+        const auto gaussian = std::sqrt(-2.0f * std::log(u1)) * std::cos(2.0f * std::numbers::pi_v<float> * u2);
+        return std::clamp(gaussian * 0.3f, -1.0f, 1.0f);
     }
 
-    void createSincFeed()
-    {
-        const auto numSamples = m_triggerPattern.size();
-        const auto kernelMid = static_cast<float>(numSamples - 1) * 0.5f;
-        const auto kernelWidth = static_cast<float>(numSamples) * 0.15f; // or choose based on your use-case
-
-        enum WindowType
-        {
-            Hann,
-            Blackman
-        };
-
-        auto windowValue = [numSamples](size_t i, WindowType type)
-        {
-            switch (type)
-            {
-                case Hann:
-                    return 0.5f - 0.5f * std::cos(2.0f * std::numbers::pi_v<float> * static_cast<float>(i) /
-                                                  (numSamples - 1)); // Hann
-                case Blackman:
-                    return 0.42f -
-                           0.5f *
-                               std::cos(2.0f * std::numbers::pi_v<float> * static_cast<float>(i) / (numSamples - 1)) +
-                           0.08f * std::cos(4.0f * std::numbers::pi_v<float> * static_cast<float>(i) /
-                                            (numSamples - 1)); // Blackman
-            }
-            return 1.0f;
-        };
-
-        for (std::size_t i = 0; i < numSamples; ++i)
-        {
-            const auto x = static_cast<float>(i) - kernelMid;
-            const auto sincVal = (x == 0.0f) ? 1.0f
-                                             : std::sin(std::numbers::pi_v<float> * x / kernelWidth) /
-                                                   (std::numbers::pi_v<float> * x / kernelWidth);
-            m_triggerPattern[i] = sincVal * windowValue(i, Hann);
-        }
-    }
-
-    void fillFrequencyTable() noexcept
-    {
-        const auto baseFrequency = 440 * std::pow(2.f, static_cast<float>(minMidiNote - 69) / 12.f);
-        constexpr auto slotsPerOctave = static_cast<float>(stepsPerSemitone) * 12;
-        for (size_t j = 0; j < m_bq.size(); ++j)
-        {
-            const auto f = baseFrequency * std::pow(2.f, static_cast<float>(j) / slotsPerOctave);
-            m_frequencies[j] = f;
-        }
-    }
 
     size_t getFrequencyIndex(const float targetFreq) const noexcept
     {
         const auto baseFrequency = 440.0f * std::pow(2.0f, static_cast<float>(minMidiNote - 69) / 12.0f);
         constexpr auto slotsPerOctave = static_cast<float>(stepsPerSemitone) * 12.0f;
-
-        // Inverse of: f = baseFrequency * std::pow(2.f, j / slotsPerOctave)
-        // j = log2(f / baseFrequency) * slotsPerOctave
         const auto exactIndex = std::log2(targetFreq / baseFrequency) * slotsPerOctave;
         const auto roundedIndex = static_cast<size_t>(std::round(exactIndex));
-
-        // Clamp to valid range
         return std::clamp(roundedIndex, size_t{0}, m_frequencies.size() - 1);
     }
 
-    void assignFrequencyAndDecay() noexcept
-    {
-        for (size_t j = 0; j < m_bq.size(); ++j)
-        {
-            m_bq[j].setByDecay(m_frequencies[j], 0.02f + m_decay * 10.f);
-        }
-    }
-
-    template <bool IsOdd>
-    void addOvertones(const size_t index, const float power)
-    {
-        const auto value = IsOdd ? m_odds : m_evens;
-        const auto skew = IsOdd ? m_skewOdds : m_skewEvens;
-
-        if (value <= 0.0f)
-        {
-            return;
-        }
-
-        const auto currentFreq = m_frequencies[index];
-        const auto maxFreq = m_frequencies.back();
-        const int maxOvertone = 20;
-        for (int overtoneNum = 1; overtoneNum <= maxOvertone; ++overtoneNum)
-        {
-            const auto overtoneMultiplier = IsOdd ? (2 * overtoneNum + 1) * skew : (2 * overtoneNum) * skew;
-            const auto overtoneFreq = currentFreq * overtoneMultiplier;
-
-            if (overtoneFreq >= maxFreq)
-            {
-                break;
-            }
-
-            const auto targetIndex = getFrequencyIndex(overtoneFreq);
-            if (targetIndex >= m_bq.size())
-            {
-                continue;
-            }
-
-            const auto overtonePosition = static_cast<float>(overtoneNum - 1) / (maxOvertone - 1);
-
-            float overtonePower;
-            if (value <= 0.5f)
-            {
-                const auto decayFactor = 1.0f - overtonePosition;
-                const auto equalFactor = 1.0f;
-                const auto blend = value * 2.0f;
-                overtonePower = power * value * (decayFactor * (1.0f - blend) + equalFactor * blend);
-            }
-            else
-            {
-                const auto equalFactor = 1.0f;
-                const auto increaseFactor = overtonePosition;
-                const auto blend = (value - 0.5f) * 2.0f;
-                overtonePower = power * 0.5f * (equalFactor * (1.0f - blend) + increaseFactor * blend);
-            }
-            std::cout << m_frequencies[targetIndex] << "\t" << overtonePower << std::endl;
-            if (overtonePower > .1f)
-            {
-                triggerSingleSlot(targetIndex, overtonePower);
-                addSpreads(targetIndex, overtonePower);
-            }
-        }
-    }
-
-    void addOdds(const size_t index, const float power)
-    {
-        addOvertones<true>(index, power);
-    }
-
-    void addEvens(const size_t index, const float power)
-    {
-        addOvertones<false>(index, power);
-    }
-
-    void addStretched(const size_t index, const float power)
-    {
-        if (m_stretched <= 0.0f)
-        {
-            return;
-        }
-
-        const auto currentFreq = m_frequencies[index];
-        const auto maxFreq = m_frequencies.back();
-        const int maxOvertone = 20;
-
-        for (int overtoneNum = 2; overtoneNum <= maxOvertone; ++overtoneNum) // Start from 2nd harmonic
-        {
-            // Piano-like inharmonicity: f_n = f_0 * n * sqrt(1 + B * n^2)
-            // Where B is the inharmonicity coefficient
-            const auto B = m_stretched * 0.001f; // Scale factor for musical usefulness
-            const auto stretchFactor = std::sqrt(1.0f + B * overtoneNum * overtoneNum);
-            const auto overtoneFreq = currentFreq * overtoneNum * stretchFactor;
-
-            if (overtoneFreq >= maxFreq)
-            {
-                break;
-            }
-
-            const auto targetIndex = getFrequencyIndex(overtoneFreq);
-            if (targetIndex >= m_bq.size())
-            {
-                continue;
-            }
-
-            // Use same power distribution as other overtones
-            const auto overtonePosition = static_cast<float>(overtoneNum - 2) / (maxOvertone - 2);
-
-            float overtonePower;
-            if (m_stretched <= 0.5f)
-            {
-                const auto decayFactor = 1.0f - overtonePosition;
-                const auto equalFactor = 1.0f;
-                const auto blend = m_stretched * 2.0f;
-                overtonePower = power * m_stretched * (decayFactor * (1.0f - blend) + equalFactor * blend);
-            }
-            else
-            {
-                const auto equalFactor = 1.0f;
-                const auto increaseFactor = overtonePosition;
-                const auto blend = (m_stretched - 0.5f) * 2.0f;
-                overtonePower = power * 0.5f * (equalFactor * (1.0f - blend) + increaseFactor * blend);
-            }
-
-            if (overtonePower > 0.1f)
-            {
-                triggerSingleSlot(targetIndex, overtonePower);
-                addSpreads(targetIndex, overtonePower);
-            }
-        }
-    }
-
-    std::array<BiquadBandPass, NumElements> m_bq{};
-    std::array<unsigned, NumElements> m_trigger{};
-    std::array<float, NumElements> m_triggerGain{};
-    std::array<float, NumElements> m_frequencies{};
-    std::array<float, 100> m_triggerPattern;
     float m_sampleRate;
-    float m_spread{0.f};
-    float m_decay{0.1f};
-    float m_odds{0.f};
-    float m_skewOdds{0.f};
-    float m_evens{0.f};
-    float m_skewEvens{0.f};
-    float m_stretched{0.f};
-    float m_randomSpread{0.f};
-    float m_randomPower{0.f};
+    float m_currentVelocity{1.0f};
+    float m_randomPower{0.0f};
+    size_t m_countVoices{0};
+    int m_sparkleTimeBlocks{0};
+    float m_sparkleRandom{0};
+    float m_decay{0.f};
+
+    std::array<float, NumElements> m_frequencies{};
+
+    mutable std::mt19937 m_randomGenerator{std::random_device{}()};
+
+    std::function<void(size_t, float, float)> m_triggerCallback;
+    std::function<size_t(float)> m_getFrequencyIndexFunc;
+    std::function<float()> m_getRandomnessFunc;
+    std::function<void(size_t, float)> m_spreadCallback;
+    std::pair<int, int> m_overtoneCount;
+    std::unique_ptr<PingSpread<NumElements, stepsPerSemitone>> m_spreadGenerator;
+    std::unique_ptr<OddHarmonicGenerator<NumElements>> m_oddGenerator;
+    std::unique_ptr<EvenHarmonicGenerator<NumElements>> m_evenGenerator;
+    std::unique_ptr<StretchedHarmonicGenerator<NumElements>> m_stretchedGenerator;
+    ResoGenerator<BlockSize, NumElements> m_resoEngine;
 };

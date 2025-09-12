@@ -19,6 +19,25 @@ option(JUCE_ENABLE_MODULE_SOURCE_GROUPS "Show all module sources in IDE projects
 
 add_subdirectory(3rdparty/JUCE build)
 
+# Create optimized DSP library
+add_library(PingSynthDSP STATIC
+        src/impl/ResoGenerator.cpp
+        src/impl/BiquadBandPass.h
+        src/impl/PingExcitation.h
+)
+
+target_include_directories(PingSynthDSP PUBLIC src/impl)
+target_compile_features(PingSynthDSP PRIVATE cxx_std_20)
+
+# Force optimization for the DSP library even in debug builds
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(PingSynthDSP PRIVATE -O3)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        target_compile_options(PingSynthDSP PRIVATE /O2)
+    endif()
+endif()
+
 # Check the readme at `docs/CMake API.md` in the JUCE repo for full config
 # https://github.com/juce-framework/JUCE/blob/master/docs/CMake%20API.md
 juce_add_plugin("${PROJECT_NAME}"
@@ -56,6 +75,13 @@ set(SourceFiles
         src/PingsynthEditor.h
         src/PingsynthProcessor.h
         src/PingsynthProcessor.cpp
+        src/impl/BiquadBandPass.h
+        src/impl/PingExcitation.h
+        src/impl/PingHarmonics.h
+        src/impl/PingSpread.h
+        src/impl/PingSynth.h
+        src/impl/PingSynthExplorerPedal.h
+        src/impl/ResoGenerator.h
 )
 
 target_include_directories("${PROJECT_NAME}" PUBLIC 3rdparty/AbacDsp/src/includes)
@@ -99,6 +125,7 @@ target_compile_definitions("${PROJECT_NAME}"
 target_link_libraries("${PROJECT_NAME}"
         PRIVATE
         Assets
+        PingSynthDSP  # Link the optimized DSP library
         ${JUCE_DEPENDENCIES}
         PUBLIC
         juce::juce_recommended_config_flags

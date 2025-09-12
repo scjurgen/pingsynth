@@ -1,0 +1,204 @@
+#pragma once
+
+#include <array>
+#include <iostream>
+#include <memory>
+#include <random>
+
+#include "BiquadBandPass.h"
+#include "PingExcitation.h"
+
+template <size_t BlockSize, size_t NumElements>
+class ResoGenerator
+{
+  public:
+    explicit ResoGenerator(const float sampleRate, const int minMidiNote, const int stepsPerSemitone)
+        : m_sampleRate(sampleRate)
+        , m_excitation(1024)
+    {
+        fillFrequencyTable(minMidiNote, stepsPerSemitone);
+        calculatePhaseAdvances();
+
+        for (auto& f : m_bq)
+        {
+            f.setSampleRate(sampleRate);
+        }
+
+        assignFrequencyAndDecay();
+    }
+
+    void setDecay(const float decay) noexcept
+    {
+        m_decay = decay;
+        newDecay();
+    }
+
+    void setDecaySkew(const float value) noexcept
+    {
+        m_decaySkew = value;
+        newDecay();
+    }
+
+    void setExcitationNoise(const float value) noexcept
+    {
+        m_excitation.setNoise(value);
+    }
+
+    void triggerNew(size_t index, float power, size_t triggerWaitBlocks)
+    {
+        m_trigger[index] = static_cast<float>(m_excitation.getPatternLength() - 1);
+        m_triggerGain[index] = power / logisticCompensation(m_frequencies[index]);
+        m_triggerWait[index] = triggerWaitBlocks;
+        m_activeState[index] = triggerWaitBlocks == 0 ? 1 : 2;
+        cntActive++;
+    }
+
+    void checkActivity()
+    {
+        cntActive = 0;
+        for (size_t j = 0; j < m_bq.size(); ++j)
+        {
+            if (m_activeState[j])
+            {
+                cntActive++;
+                if (m_activeState[j] == 1)
+                {
+                    m_activeState[j] = m_bq[j].isActive() ? 1 : 0;
+                }
+            }
+        }
+    }
+
+    static float logisticCompensation(const float frequency) noexcept
+    {
+        constexpr auto y_inf = -0.00337839f;
+        constexpr auto y0 = -1.157336f;
+        constexpr auto fc = 52.56845f;
+        constexpr auto k = 1.081108f;
+        const auto ratio = std::pow(frequency / fc, k);
+        return -(y_inf + (y0 - y_inf) / (1.0f + ratio));
+    }
+
+    void processBlock(std::array<float, BlockSize>& out) noexcept
+    {
+        for (size_t i = 0; i < BlockSize; ++i)
+        {
+            out[i] = 0.f;
+        }
+        if (!cntActive)
+        {
+            return;
+        }
+
+        for (size_t j = 0; j < m_bq.size(); ++j)
+        {
+            if (m_activeState[j] == 2)
+            {
+                --m_triggerWait[j];
+                if (m_triggerWait[j] == 0)
+                {
+                    m_activeState[j] = 1;
+                }
+            }
+            if (m_activeState[j] == 1)
+            {
+                for (size_t i = 0; i < BlockSize; ++i)
+                {
+                    if (m_trigger[j] > 0.0f)
+                    {
+                        const auto excitationValue = m_excitation.getInterpolatedValue(m_trigger[j]);
+                        const auto v = m_triggerGain[j] * excitationValue;
+                        out[i] += m_bq[j].step(v);
+                        m_trigger[j] -= m_phaseAdvance[j];
+                        if (m_trigger[j] <= 0.0f)
+                        {
+                            m_triggerGain[j] = 0.f;
+                        }
+                    }
+                    else
+                    {
+                        out[i] += m_bq[j].step(0.f);
+                    }
+                }
+            }
+        }
+        checkActivity();
+    }
+
+    void fillFrequencyTable(const int minMidiNote, const int stepsPerSemitone) noexcept
+    {
+        const auto baseFrequency = 440 * std::pow(2.f, static_cast<float>(minMidiNote - 69) / 12.f);
+        const auto slotsPerOctave = static_cast<float>(stepsPerSemitone) * 12;
+
+        for (size_t j = 0; j < m_bq.size(); ++j)
+        {
+            const auto f = baseFrequency * std::pow(2.f, static_cast<float>(j) / slotsPerOctave);
+            m_frequencies[j] = f;
+        }
+        calculatePhaseAdvances();
+        assignFrequencyAndDecay();
+    }
+
+    const std::array<float, NumElements> getFrequencies() const
+    {
+        return m_frequencies;
+    }
+
+  private:
+    void calculatePhaseAdvances() noexcept
+    {
+        const float patternLength = static_cast<float>(m_excitation.getPatternLength());
+        constexpr float periodsInPattern = 2.0f;
+
+        for (size_t j = 0; j < m_frequencies.size(); ++j)
+        {
+            const float samplesForTwoPeriods = (periodsInPattern / m_frequencies[j]) * m_sampleRate;
+            m_phaseAdvance[j] = patternLength / samplesForTwoPeriods;
+        }
+    }
+
+
+    void assignFrequencyAndDecay() noexcept
+    {
+        for (size_t j = 0; j < m_bq.size(); ++j)
+        {
+            m_bq[j].setByDecay(m_frequencies[j], 0.02f + m_decay * 10.f);
+        }
+    }
+
+    float m_decaySkew = 0.3f;
+
+    void newDecay() noexcept
+    {
+        const float centerDecay = 0.02f + m_decay * 10.f;
+        // Middle C as reference
+        const float centerFreq = 440.f * std::pow(2.f, -9.f / 12.f); // ~261.63 Hz (middle C)
+
+        for (size_t j = 0; j < m_bq.size(); ++j)
+        {
+            float adjDecay = centerDecay;
+            if (m_decaySkew != 0.0f)
+            {
+                const float octaveDistanceFromCenter = std::log2(m_frequencies[j] / centerFreq);
+                const float skewMultiplier = std::pow(2.0f, -m_decaySkew * octaveDistanceFromCenter);
+                adjDecay = centerDecay * skewMultiplier;
+            }
+            m_bq[j].setDecay(adjDecay);
+        }
+    }
+
+    float m_sampleRate;
+    float m_decay{0.1f};
+    size_t m_countVoices{0};
+    size_t lastCnt = 0;
+    size_t cntActive = 0;
+
+    std::array<float, NumElements> m_frequencies{};
+    std::array<BiquadBandPass, NumElements> m_bq{};
+    Excitation m_excitation;
+    std::array<size_t, NumElements> m_triggerWait{};
+    std::array<float, NumElements> m_trigger{};
+    std::array<float, NumElements> m_triggerGain{};
+    std::array<float, NumElements> m_phaseAdvance{};
+    std::array<int, NumElements> m_activeState{};
+};

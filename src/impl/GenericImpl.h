@@ -29,6 +29,10 @@ class GenericImpl final : public EffectBase
     {
         m_user1 = value;
     }
+    void setUser10(const float value)
+    {
+        m_user10 = value;
+    }
     void setUser2(const float value)
     {
         m_user2 = value;
@@ -37,13 +41,13 @@ class GenericImpl final : public EffectBase
     {
         m_user3 = value;
     }
-    void setUser4(const float value)
-    {
-        m_user4 = value;
-    }
     void setUser5(const float value)
     {
         m_user5 = value;
+    }
+    void setUser4(const float value)
+    {
+        m_user4 = value;
     }
     void setUser6(const float value)
     {
@@ -61,9 +65,25 @@ class GenericImpl final : public EffectBase
     {
         m_user9 = value;
     }
-    void setUser10(const float value)
+    void setUser11(const float value)
     {
-        m_user10 = value;
+        m_user11 = value;
+    }
+    void setUser12(const float value)
+    {
+        m_user12 = value;
+    }
+    void setUser13(const float value)
+    {
+        m_user13 = value;
+    }
+    void setUser14(const float value)
+    {
+        m_user14 = value;
+    }
+    void setUser15(const float value)
+    {
+        m_user15 = value;
     }
 
     void processBlock(const AudioBuffer<2, BlockSize>& in, AudioBuffer<2, BlockSize>& out)
@@ -79,13 +99,18 @@ class GenericImpl final : public EffectBase
     float m_vol{};
     float m_reverbLevel{};
     float m_user1{};
+    float m_user10{};
     float m_user2{};
     float m_user3{};
-    float m_user4{};
     float m_user5{};
+    float m_user4{};
     float m_user6{};
     float m_user7{};
     float m_user8{};
     float m_user9{};
-    float m_user10{};
+    float m_user11{};
+    float m_user12{};
+    float m_user13{};
+    float m_user14{};
+    float m_user15{};
 };
