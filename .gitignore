@@ -1,0 +1,15 @@
+init-project.sh
+.venv
+venv
+.idea
+BANK*
+cmake-build-*
+.DS_Store
+abacad.lv2
+.build*
+packages
+*.lv2
+*.tar.gz
+*.log
+__pycache__
+
