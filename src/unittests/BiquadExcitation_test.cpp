@@ -1,13 +1,4 @@
-/*
-27.500 -0.774
-55.000 -0.568
-110.000 -0.360
-220.000 -0.205
-440.000 -0.110
-880.000 -0.057
-1760.000 -0.029
 
-*/
 
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
@@ -17,148 +8,128 @@
 #include <iomanip>
 #include <vector>
 
-#include "AudioFile.h"
-
+#include "impl/AudioFile.h"
 #include "impl/BiquadBandPass.h"
 #include "impl/PingExcitation.h"
 
 TEST(BiquadExcitationTest, amplitudeAndResponse)
 {
-    constexpr auto sampleRate{48000.f};
-    constexpr auto periodLength = 100;
-    constexpr auto testFrequency = sampleRate / periodLength; // 480 Hz
-    constexpr auto patternLength = 1024;
-    constexpr auto decayThreshold = 0.001f; // Stop measuring when max value drops below this
-
-    BiquadBandPass bq;
-    Excitation excitation(patternLength);
-
-    excitation.generateSineWave();
-    bq.setSampleRate(sampleRate);
-    bq.setByDecay(testFrequency, 0.1f);
-
-    // Calculate phase advance for the test frequency
-    const float samplesForTwoPeriods = (2.0f / testFrequency) * sampleRate;
-    const float phaseAdvance = static_cast<float>(patternLength) / samplesForTwoPeriods;
-
-    // Process the excitation signal through the bandpass filter
-    std::vector<float> output;
-    float currentPhase = static_cast<float>(patternLength - 1); // Start from end
-    float globalMin = 0.0f;
-    float globalMax = 0.0f;
-
-    // Process until excitation is exhausted or we hit max samples
-    const size_t maxSamples = 20000; // Safety limit
-    while (currentPhase >= 0.0f && output.size() < maxSamples)
+    for (auto periodLength = 25; periodLength < 2000; periodLength *= 2)
     {
-        const float excitationValue = excitation.getInterpolatedValue(currentPhase);
-        const float filterOutput = bq.step(excitationValue);
-        output.push_back(filterOutput);
-        // Track global min/max
-        globalMin = std::min(globalMin, filterOutput);
-        globalMax = std::max(globalMax, filterOutput);
-        currentPhase -= phaseAdvance;
-    }
-    std::cout << globalMin << "\t" << globalMax << std::endl;
+        constexpr auto sampleRate{48000.f};
 
-    // Continue processing with zero input to capture full decay
-    while (output.size() < maxSamples)
-    {
-        const float filterOutput = bq.step(0.0f);
-        output.push_back(filterOutput);
+        const auto testFrequency = sampleRate / periodLength; // 480 Hz
+        constexpr auto patternLength = 1024;
+        constexpr auto decayThreshold = 0.001f;
 
-        globalMin = std::min(globalMin, filterOutput);
-        globalMax = std::max(globalMax, filterOutput);
-    }
+        BiquadBandPass bq{sampleRate};
+        Excitation excitation(patternLength);
 
-    // Find zero crossings
-    std::vector<size_t> zeroCrossings;
-    for (size_t i = 1; i < output.size(); ++i)
-    {
-        if (output[i - 1] < 0.0f && output[i] >= 0.0f)
+        bq.setByDecay(testFrequency, 0.1f);
+
+        const auto samplesForTwoPeriods = 2.0f / testFrequency * sampleRate;
+        const auto phaseAdvance = static_cast<float>(patternLength) / samplesForTwoPeriods;
+
+        std::vector<float> output;
+        auto currentPhase = static_cast<float>(patternLength - 1);
+        auto globalMin = 0.0f;
+        auto globalMax = 0.0f;
+
+        // Process until excitation is exhausted or we hit max samples
+        const size_t maxSamples = 20000; // Safety limit
+        while (currentPhase >= 0.0f && output.size() < maxSamples)
         {
-            zeroCrossings.push_back(i);
-        }
-    }
-
-    // Measure decay time: find max absolute value between each zero crossing
-    std::vector<float> peaksBetweenCrossings;
-    size_t decaySteps = 0;
-
-    for (size_t i = 0; i < zeroCrossings.size() - 1; ++i)
-    {
-        const size_t startIdx = zeroCrossings[i];
-        const size_t endIdx = zeroCrossings[i + 1];
-
-        float maxAbsInSegment = 0.0f;
-        for (size_t j = startIdx; j < endIdx && j < output.size(); ++j)
-        {
-            maxAbsInSegment = std::max(maxAbsInSegment, std::abs(output[j]));
+            const float excitationValue = excitation.getInterpolatedValue(currentPhase);
+            const float filterOutput = bq.step(excitationValue);
+            output.push_back(filterOutput);
+            // Track global min/max
+            globalMin = std::min(globalMin, filterOutput);
+            globalMax = std::max(globalMax, filterOutput);
+            currentPhase -= phaseAdvance;
         }
 
-        peaksBetweenCrossings.push_back(maxAbsInSegment);
-
-        // Count steps until decay threshold is reached
-        if (maxAbsInSegment >= decayThreshold)
+        // Continue processing with zero input to capture full decay
+        while (output.size() < maxSamples)
         {
-            decaySteps = endIdx;
+            const float filterOutput = bq.step(0.0f);
+            output.push_back(filterOutput);
+
+            globalMin = std::min(globalMin, filterOutput);
+            globalMax = std::max(globalMax, filterOutput);
         }
-    }
 
-    // Calculate average period length from zero crossings
-    float averagePeriodLength = 0.0f;
-    if (zeroCrossings.size() >= 2)
-    {
-        const size_t totalSamplesBetweenCrossings = zeroCrossings.back() - zeroCrossings.front();
-        const size_t numberOfPeriods = zeroCrossings.size() - 1;
-        averagePeriodLength = static_cast<float>(totalSamplesBetweenCrossings) / static_cast<float>(numberOfPeriods);
-    }
-
-    // Assertions for the interaction behavior
-    EXPECT_GT(globalMax, 0.0f) << "Filter should produce positive peaks";
-    EXPECT_LT(globalMin, 0.0f) << "Filter should produce negative peaks";
-    EXPECT_GT(zeroCrossings.size(), 5) << "Should have multiple zero crossings for oscillation";
-    EXPECT_GT(decaySteps, 0) << "Should measure decay over time";
-    EXPECT_LT(decaySteps, output.size()) << "Should decay before reaching maximum samples";
-
-    if (!peaksBetweenCrossings.empty())
-    {
-        // Verify decay: later peaks should generally be smaller than earlier ones
-        const float firstPeak = peaksBetweenCrossings.front();
-        const float lastPeak = peaksBetweenCrossings.back();
-        EXPECT_GT(firstPeak, lastPeak) << "Filter response should decay over time";
-
-        // Check that we have reasonable decay progression
-        bool foundDecreasingTrend = false;
-        for (size_t i = 1; i < peaksBetweenCrossings.size(); ++i)
+        size_t first = 0;
+        size_t last = 0;
+        size_t cntZC = 0;
+        auto maxAbsInSegment = std::max(std::abs(globalMax), std::abs(globalMin));
+        auto previousMax = maxAbsInSegment;
+        for (size_t i = 1; i < output.size(); ++i)
         {
-            if (peaksBetweenCrossings[i] < peaksBetweenCrossings[i - 1] * 0.9f) // 10% decay
+            maxAbsInSegment = std::max(maxAbsInSegment, output[i - 1]);
+
+            if (output[i - 1] < 0.0f && output[i] >= 0.0f)
             {
-                foundDecreasingTrend = true;
-                break;
+                if (first == 0)
+                {
+                    first = i;
+                }
+                else
+                {
+                    if (maxAbsInSegment < decayThreshold)
+                    {
+                        last = i;
+                        break;
+                    }
+                }
+                if (++cntZC > 3) // skip first 3 as the sound builds up
+                {
+                    EXPECT_GT(previousMax, maxAbsInSegment); // check for clean decay
+                }
+                previousMax = maxAbsInSegment;
+                maxAbsInSegment = 0.f;
             }
         }
-        EXPECT_TRUE(foundDecreasingTrend) << "Should show clear decay trend";
-    }
 
-    // Verify period length is reasonable (should be close to expected frequency response)
-    if (averagePeriodLength > 0.0f)
-    {
-        const float measuredFrequency = sampleRate / (averagePeriodLength * 2.0f); // *2 for full cycle
-        const float frequencyRatio = measuredFrequency / testFrequency;
-        EXPECT_GT(frequencyRatio, 0.8f) << "Measured frequency should be reasonably close to input";
-        EXPECT_LT(frequencyRatio, 1.2f) << "Measured frequency should be reasonably close to input";
+        float averagePeriodLength = 0.0f;
+        if (cntZC >= 2)
+        {
+            const size_t totalSamplesBetweenCrossings = last - first;
+            const size_t numberOfPeriods = cntZC;
+            averagePeriodLength =
+                static_cast<float>(totalSamplesBetweenCrossings) / static_cast<float>(numberOfPeriods);
+        }
+        EXPECT_GT(globalMax, 0.0f) << "Filter should produce positive peaks";
+        EXPECT_LT(globalMin, 0.0f) << "Filter should produce negative peaks";
+
+        EXPECT_GT(cntZC, 0) << "Should measure decay over time";
+        EXPECT_LT(cntZC, output.size()) << "Should decay before reaching maximum samples";
+
+        if (averagePeriodLength > 0.0f)
+        {
+            const float measuredFrequency = sampleRate / averagePeriodLength;
+            const float frequencyRatio = measuredFrequency / testFrequency;
+            EXPECT_GT(frequencyRatio, 0.8f) << "Measured frequency should be reasonably close to input";
+            EXPECT_LT(frequencyRatio, 1.2f) << "Measured frequency should be reasonably close to input";
+        }
     }
 }
-float logisticCompensation(float frequency)
+
+float logisticCompensation(float x)
 {
-    const float y_inf = -0.00337839f;
-    const float y0 = -1.157336f;
-    const float fc = 52.56845f;
-    const float k = 1.081108f;
-    const float ratio = std::pow(frequency / fc, k);
-    // This yields y in the range [y0 … y_inf]; invert sign if needed
-    return y_inf + (y0 - y_inf) / (1.0f + ratio);
+    float power = std::pow(x / 95.18412f, 1.189401f);
+    float numerator = 1.f * (1.f + power);
+    float denominator = 0.8258689f + 0.006020447f * power;
+    float result = numerator / denominator;
+    return result;
+    // return 0.008366906f + (0.8298868f - 0.008366906f) / (1 + std::pow(x / 93.56315f, 1.191096f));
+    return 0.006020447f + (0.8258689f - 0.006020447f) / (1 + std::pow(x / 95.18412f, 1.189401f));
+    // const float y_inf = -0.00337839f;
+    // const float y0 = -1.157336f;
+    // const float fc = 52.56845f;
+    // const float k = 1.081108f;
+    // const float ratio = std::pow(frequency / fc, k);
+    // // This yields y in the range [y0 … y_inf]; invert sign if needed
+    // return y_inf + (y0 - y_inf) / (1.0f + ratio);
 }
 
 TEST(BiquadExcitationTest, frequencyAnalysis)
@@ -166,12 +137,12 @@ TEST(BiquadExcitationTest, frequencyAnalysis)
     constexpr auto sampleRate{48000.f};
     constexpr auto patternLength = 1024;
     constexpr auto decayThreshold = 0.001f;
-    constexpr int startMidiNote = 21; // 27.5 Hz (A0)
-    constexpr int endMidiNote = 108;  // 4186 Hz (C8)
+    constexpr int startMidiNote = 10; // 27.5 Hz (A0)
+    constexpr int endMidiNote = 128;  // 4186 Hz (C8)
 
     // Print CSV header
-    std::cout << "MidiNote\tFrequency\tMinAfterExcitation\tMaxAfterExcitation\t"
-              << "MinAfterDecay\tMaxAfterDecay\tMeasuredFrequency\tDecayTime" << std::endl;
+    std::cout << "MidiNote\tFrequency\tMinDelta\tMinAfterExcitation\tMaxAfterExcitation\t"
+              << "MeasuredFrequency\tDecayTime" << std::endl;
 
     for (int midiNote = startMidiNote; midiNote <= endMidiNote; midiNote += 1)
     {
@@ -180,8 +151,8 @@ TEST(BiquadExcitationTest, frequencyAnalysis)
 
         BiquadBandPass bq;
         Excitation excitation(patternLength);
+        excitation.setNoise(0.0f);
 
-        excitation.generateSineWave();
         // excitation.generateNoise();
         bq.setSampleRate(sampleRate);
         bq.setByDecay(frequency, 0.1f);
@@ -202,7 +173,8 @@ TEST(BiquadExcitationTest, frequencyAnalysis)
         {
             const float excitationValue = excitation.getInterpolatedValue(currentPhase);
             // const float compensation = 12.0f * std::pow(frequency / 440.0f, 0.7f);
-            const float compensation = 1 / logisticCompensation(frequency);
+            const float compensation = 0.5f * logisticCompensation(frequency);
+            // const float compensation = 1.f;
             const float filterOutput = bq.step(excitationValue * compensation);
             output.push_back(filterOutput);
 
@@ -276,9 +248,11 @@ TEST(BiquadExcitationTest, frequencyAnalysis)
         audioFile.save(filename);
 
         // Output results as tab-separated values
-        std::cout << std::fixed << std::setprecision(3) << midiNote << "\t" << frequency << "\t" << minAfterExcitation
-                  << "\t" << maxAfterExcitation << "\t" << minAfterDecay << "\t" << maxAfterDecay << "\t"
-                  << measuredFrequency << "\t" << decaySteps << std::endl;
+        // std::cout << std::fixed << std::setprecision(3) << midiNote << "\t" << frequency << "\t"
+        //           << (maxAfterExcitation - minAfterExcitation) * 0.5f << "\t" << minAfterExcitation << "\t"
+        //           << maxAfterExcitation << "\t" << measuredFrequency << "\t" << decaySteps << std::endl;
+        std::cout << frequency << "\t" << std::log10(0.5f * (maxAfterExcitation - minAfterExcitation)) * 20.f
+                  << std::endl;
     }
 
     // This test always passes - it's just for data collection

@@ -41,7 +41,7 @@ class HarmonicGeneratorBase
     SpreadCallback m_spreadCallback;
     std::pair<int, int> m_overtoneCount{3, 10};
 
-    void triggerHarmonic(const size_t targetIndex, const float overtonePower, const int order)
+    void triggerHarmonic(const size_t targetIndex, const float overtonePower, const int order) noexcept
     {
         if (overtonePower > 0.1f)
         {
@@ -54,7 +54,7 @@ class HarmonicGeneratorBase
         }
     }
 
-    float applyPowerRandomness(float power) const
+    [[nodiscard]] float applyPowerRandomness(const float power) const noexcept
     {
         if (m_randomPower > 0.0f)
         {
@@ -64,31 +64,29 @@ class HarmonicGeneratorBase
         return power;
     }
 
-    int getMaxOvertone() const
+    [[nodiscard]] int getMaxOvertone() const noexcept
     {
         return static_cast<int>(m_overtoneCount.first +
                                 m_currentVelocity * (m_overtoneCount.second - m_overtoneCount.first));
     }
 
-    float calculateOvertonePower(float basePower, float value, float overtonePosition) const
+    [[nodiscard]] static float calculateOvertonePower(const float basePower, const float value,
+                                                      const float overtonePosition) noexcept
     {
         if (value <= 0.5f)
         {
             const auto decayFactor = 1.0f - overtonePosition;
-            constexpr auto equalFactor = 1.0f;
             const auto blend = value * 2.0f;
-            return basePower * value * (decayFactor * (1.0f - blend) + equalFactor * blend);
+            return basePower * value * (decayFactor * (1.0f - blend) + blend);
         }
-
-        constexpr auto equalFactor = 1.0f;
         const auto increaseFactor = overtonePosition;
-        const auto blend = (value - 0.5f) * 2.0f;
-        return basePower * 0.5f * (equalFactor * (1.0f - blend) + increaseFactor * blend);
+        const auto blend = value * 2.f - 1.f;
+        return basePower * 0.5f * (1.f - blend + increaseFactor * blend);
     }
 };
 
 template <size_t NumElements>
-class OddHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
+class OddHarmonicGenerator final : public HarmonicGeneratorBase<NumElements>
 {
   private:
     float m_odds{0.0f};
@@ -107,19 +105,22 @@ class OddHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
     {
     }
 
-    void setOdds(float value) noexcept
+    void setOdds(const float value) noexcept
     {
         m_odds = value;
     }
-    void setSkewOdds(float value) noexcept
+
+    void setSkewOdds(const float value) noexcept
     {
         m_skewOdds = std::pow(2.0f, value);
     }
 
-    void generateHarmonics(size_t index, float power) override
+    void generateHarmonics(const size_t index, const float power) override
     {
         if (m_odds <= 0.0f)
+        {
             return;
+        }
 
         const auto currentFreq = this->m_frequencies[index];
         const auto maxFreq = this->m_frequencies.back();
@@ -129,21 +130,14 @@ class OddHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
         {
             const auto overtoneMultiplier = (2 * overtoneNum + 1) * m_skewOdds;
             const auto overtoneFreq = currentFreq * overtoneMultiplier;
-
             if (overtoneFreq >= maxFreq)
             {
                 break;
             }
-
             const auto targetIndex = this->m_getFrequencyIndex(overtoneFreq);
-            if (targetIndex >= this->m_frequencies.size())
-            {
-                continue;
-            }
-
             const auto overtonePosition = static_cast<float>(overtoneNum - 1) / (maxOvertone - 1);
-            auto overtonePower = this->calculateOvertonePower(power, m_odds, overtonePosition);
-            overtonePower = this->applyPowerRandomness(overtonePower);
+            const auto overtonePower =
+                this->applyPowerRandomness(this->calculateOvertonePower(power, m_odds, overtonePosition));
 
             this->triggerHarmonic(targetIndex, overtonePower, overtoneNum);
         }
@@ -151,7 +145,7 @@ class OddHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
 };
 
 template <size_t NumElements>
-class EvenHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
+class EvenHarmonicGenerator final : public HarmonicGeneratorBase<NumElements>
 {
   private:
     float m_evens{0.0f};
@@ -170,47 +164,45 @@ class EvenHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
     {
     }
 
-    void setEvens(float value) noexcept
+    void setEvens(const float value) noexcept
     {
         m_evens = value;
     }
-    void setSkewEvens(float value) noexcept
+
+    void setSkewEvens(const float value) noexcept
     {
         m_skewEvens = std::pow(2.0f, value);
     }
 
-    void generateHarmonics(size_t index, float power) override
+    void generateHarmonics(const size_t index, const float power) override
     {
         if (m_evens <= 0.0f)
+        {
             return;
-
+        }
         const auto currentFreq = this->m_frequencies[index];
         const auto maxFreq = this->m_frequencies.back();
         const int maxOvertone = this->getMaxOvertone();
 
         for (int overtoneNum = 1; overtoneNum <= maxOvertone; ++overtoneNum)
         {
-            const auto overtoneMultiplier = (2 * overtoneNum) * m_skewEvens;
+            const auto overtoneMultiplier = static_cast<float>(2 * overtoneNum) * m_skewEvens;
             const auto overtoneFreq = currentFreq * overtoneMultiplier;
-
             if (overtoneFreq >= maxFreq)
+            {
                 break;
-
+            }
             const auto targetIndex = this->m_getFrequencyIndex(overtoneFreq);
-            if (targetIndex >= this->m_frequencies.size())
-                continue;
-
             const auto overtonePosition = static_cast<float>(overtoneNum - 1) / (maxOvertone - 1);
-            auto overtonePower = this->calculateOvertonePower(power, m_evens, overtonePosition);
-            overtonePower = this->applyPowerRandomness(overtonePower);
-
+            auto overtonePower =
+                this->applyPowerRandomness(this->calculateOvertonePower(power, m_evens, overtonePosition));
             this->triggerHarmonic(targetIndex, overtonePower, overtoneNum);
         }
     }
 };
 
 template <size_t NumElements>
-class StretchedHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
+class StretchedHarmonicGenerator final : public HarmonicGeneratorBase<NumElements>
 {
   private:
     float m_stretched{0.0f};
@@ -228,15 +220,17 @@ class StretchedHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
     {
     }
 
-    void setStretched(float value) noexcept
+    void setStretched(const float value) noexcept
     {
         m_stretched = value;
     }
 
-    void generateHarmonics(size_t index, float power) override
+    void generateHarmonics(const size_t index, const float power) override
     {
         if (m_stretched <= 0.0f)
+        {
             return;
+        }
 
         const auto currentFreq = this->m_frequencies[index];
         const auto maxFreq = this->m_frequencies.back();
@@ -248,18 +242,14 @@ class StretchedHarmonicGenerator : public HarmonicGeneratorBase<NumElements>
             const auto B = m_stretched * 0.01f;
             const auto stretchFactor = std::sqrt(1.0f + B * overtoneNum * overtoneNum);
             const auto overtoneFreq = currentFreq * overtoneNum * stretchFactor;
-
             if (overtoneFreq >= maxFreq)
+            {
                 break;
-
+            }
             const auto targetIndex = this->m_getFrequencyIndex(overtoneFreq);
-            if (targetIndex >= this->m_frequencies.size())
-                continue;
-
             const auto overtonePosition = static_cast<float>(overtoneNum - 2) / (maxOvertone - 2);
-            auto overtonePower = this->calculateOvertonePower(power, m_stretched, overtonePosition);
-            overtonePower = this->applyPowerRandomness(overtonePower);
-
+            auto overtonePower =
+                this->applyPowerRandomness(this->calculateOvertonePower(power, m_stretched, overtonePosition));
             this->triggerHarmonic(targetIndex, overtonePower, overtoneNum - 1);
         }
     }

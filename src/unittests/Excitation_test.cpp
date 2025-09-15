@@ -14,7 +14,6 @@ TEST(ExcitationTest, generalFunctionality)
     constexpr auto patternLength = 1024;
 
     Excitation excitation(patternLength);
-    excitation.generateSineWave();
 
     // Calculate phase advance for the test frequency
     // Duration of 2 periods at testFrequency

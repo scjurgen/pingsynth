@@ -47,7 +47,7 @@ class ResoGenerator
     void triggerNew(size_t index, float power, size_t triggerWaitBlocks)
     {
         m_trigger[index] = static_cast<float>(m_excitation.getPatternLength() - 1);
-        m_triggerGain[index] = power / logisticCompensation(m_frequencies[index]);
+        m_triggerGain[index] = power * logisticCompensation(m_frequencies[index]);
         m_triggerWait[index] = triggerWaitBlocks;
         m_activeState[index] = triggerWaitBlocks == 0 ? 1 : 2;
         cntActive++;
@@ -71,12 +71,10 @@ class ResoGenerator
 
     static float logisticCompensation(const float frequency) noexcept
     {
-        constexpr auto y_inf = -0.00337839f;
-        constexpr auto y0 = -1.157336f;
-        constexpr auto fc = 52.56845f;
-        constexpr auto k = 1.081108f;
-        const auto ratio = std::pow(frequency / fc, k);
-        return -(y_inf + (y0 - y_inf) / (1.0f + ratio));
+        const auto power = std::pow(frequency / 95.18412f, 1.189401f);
+        const auto numerator = 1.f + power;
+        const auto denominator = 0.8258689f + 0.006020447f * power;
+        return numerator / denominator;
     }
 
     void processBlock(std::array<float, BlockSize>& out) noexcept
