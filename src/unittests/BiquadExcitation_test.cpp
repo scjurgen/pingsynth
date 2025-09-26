@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "impl/AudioFile.h"
-#include "impl/BiquadBandPass.h"
+#include "Filters/BiquadResoBP.h"
 #include "impl/PingExcitation.h"
 
 TEST(BiquadExcitationTest, amplitudeAndResponse)
@@ -22,10 +22,10 @@ TEST(BiquadExcitationTest, amplitudeAndResponse)
         constexpr auto patternLength = 1024;
         constexpr auto decayThreshold = 0.001f;
 
-        BiquadBandPass bq{sampleRate};
+        AbacDsp::BiquadResoBP bq{sampleRate};
         Excitation excitation(patternLength);
 
-        bq.setByDecay(testFrequency, 0.1f);
+        bq.setByDecay(0, testFrequency, 0.1f);
 
         const auto samplesForTwoPeriods = 2.0f / testFrequency * sampleRate;
         const auto phaseAdvance = static_cast<float>(patternLength) / samplesForTwoPeriods;
@@ -149,13 +149,13 @@ TEST(BiquadExcitationTest, frequencyAnalysis)
         // Calculate frequency from MIDI note number
         const float frequency = 440.0f * std::pow(2.0f, (midiNote - 69) / 12.0f);
 
-        BiquadBandPass bq;
+        AbacDsp::BiquadResoBP bq;
         Excitation excitation(patternLength);
         excitation.setNoise(0.0f);
 
         // excitation.generateNoise();
         bq.setSampleRate(sampleRate);
-        bq.setByDecay(frequency, 0.1f);
+        bq.setByDecay(0, frequency, 0.1f);
 
         // Calculate phase advance for this frequency
         const float samplesForTwoPeriods = (2.0f / frequency) * sampleRate;

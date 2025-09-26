@@ -43,7 +43,8 @@ class HarmonicGeneratorBase
 
     void triggerHarmonic(const size_t targetIndex, const float overtonePower, const int order) noexcept
     {
-        if (overtonePower > 0.1f)
+        std::cout << targetIndex << "\t" << overtonePower << std::endl;
+        // if (overtonePower > 0.01f)
         {
             m_triggerCallback(targetIndex, overtonePower,
                               static_cast<float>(order) / static_cast<float>(getMaxOvertone()));

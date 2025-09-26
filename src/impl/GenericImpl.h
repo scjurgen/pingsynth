@@ -86,7 +86,7 @@ class GenericImpl final : public EffectBase
         m_user15 = value;
     }
 
-    void processBlock(const AudioBuffer<2, BlockSize>& in, AudioBuffer<2, BlockSize>& out)
+    void processBlock(const AbacDsp::AudioBuffer<2, BlockSize>& in, AbacDsp::AudioBuffer<2, BlockSize>& out)
     {
         for (size_t i = 0; i < BlockSize; ++i)
         {

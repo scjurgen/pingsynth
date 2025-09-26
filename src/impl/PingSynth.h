@@ -6,7 +6,6 @@
 #include <numbers>
 #include <functional>
 
-#include "BiquadBandPass.h"
 #include "PingHarmonics.h"
 #include "PingSpread.h"
 #include "ResoGenerator.h"
@@ -14,7 +13,7 @@
 template <size_t BlockSize>
 class PingSynth
 {
-    static constexpr int minMidiNote{21};
+    static constexpr int minMidiNote{17};
     static constexpr int maxMidiNote{132};
     static constexpr int range{maxMidiNote - minMidiNote};
     static constexpr int stepsPerSemitone{33};
@@ -224,6 +223,11 @@ class PingSynth
         if (m_countVoices == 0)
         {
         }
+    }
+
+    void setDamper(int value)
+    {
+        m_resoEngine.setDampMode(value > 63 ? false : true);
     }
 
     void processBlock(std::array<float, BlockSize>& out) noexcept

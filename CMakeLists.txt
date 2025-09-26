@@ -22,7 +22,6 @@ add_subdirectory(3rdparty/JUCE build)
 # Create optimized DSP library
 add_library(PingSynthDSP STATIC
         src/impl/ResoGenerator.cpp
-        src/impl/BiquadBandPass.h
         src/impl/PingExcitation.h
 )
 
@@ -62,27 +61,12 @@ juce_add_plugin("${PROJECT_NAME}"
 
 target_compile_features("${PROJECT_NAME}" PRIVATE cxx_std_20)
 
-set(SourceFiles
-        src/inc/CpuMeter.h
-        src/inc/CustomRotaryDial.h
-        src/inc/GenericMeter.h
-        src/inc/LookAndFeel.h
-        src/inc/SpectrogramDisplay.h
-        src/inc/VuMeter.h
-        src/inc/WaveformMeter.h
-        src/UiElements.h
-        src/PingsynthConstants.h
-        src/PingsynthEditor.h
-        src/PingsynthProcessor.h
-        src/PingsynthProcessor.cpp
-        src/impl/BiquadBandPass.h
-        src/impl/PingExcitation.h
-        src/impl/PingHarmonics.h
-        src/impl/PingSpread.h
-        src/impl/PingSynth.h
-        src/impl/PingSynthExplorerPedal.h
-        src/impl/ResoGenerator.h
-)
+file(GLOB IncludeFiles "src/inc/*.h" "src/inc/*.cpp")
+file(GLOB RootFiles "src/*.h" "src/*.cpp")
+file(GLOB ImplFiles "src/impl/*.h" "src/impl/*.cpp")
+
+set(SourceFiles ${IncludeFiles} ${RootFiles} ${ImplFiles})
+list(FILTER SourceFiles EXCLUDE REGEX ".*\\GenericImpl\\.h$")
 
 target_include_directories("${PROJECT_NAME}" PUBLIC 3rdparty/AbacDsp/src/includes)
 

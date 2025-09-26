@@ -120,17 +120,36 @@ class PingSynthExplorerPedal final : public EffectBase
         switch (msg[0] & 0xF0)
         {
             case 0x90:
-                m_ping.triggerVoice(msg[1], msg[2] / 127.f);
+                if (msg[2] != 0)
+                {
+                    m_ping.setDamper(127); // reset damper, just in case
+                    m_ping.triggerVoice(msg[1], msg[2] / 127.f);
+                }
+                else
+                {
+                    m_ping.stopVoice(msg[1], 0x40);
+                }
                 break;
             case 0x80:
                 m_ping.stopVoice(msg[1], msg[2] / 127.f);
+                break;
+            case 0xB0:
+                if (msg[1] == 120)
+                {
+                    m_ping.setDamper(msg[2]);
+                }
+                if (msg[1] == 123)
+                {
+                    m_ping.setDamper(msg[2]);
+                }
                 break;
             default:
                 break;
         }
     }
 
-    void processBlock(const AudioBuffer<NumChannels, BlockSize>& in, AudioBuffer<NumChannels, BlockSize>& out)
+    void processBlock(const AbacDsp::AudioBuffer<NumChannels, BlockSize>& in,
+                      AbacDsp::AudioBuffer<NumChannels, BlockSize>& out)
     {
         for (size_t i = 0; i < BlockSize; ++i)
         {

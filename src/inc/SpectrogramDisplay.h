@@ -95,7 +95,7 @@ class SpectrogramValue : public juce::Component
         repaint();
     }
 
-    void update(SpectrumImageSet imageSet)
+    void update(AbacDsp::SpectrumImageSet imageSet)
     {
         if (m_imageSet.activeSlice != imageSet.activeSlice)
         {
@@ -105,7 +105,7 @@ class SpectrogramValue : public juce::Component
     }
 
   private:
-    SpectrumImageSet m_imageSet{};
+    AbacDsp::SpectrumImageSet m_imageSet{};
 };
 
 
@@ -135,7 +135,7 @@ class SpectrogramDisplay : public juce::Component
         spectrogramImage.setBounds(bounds);
     }
 
-    void update(SpectrumImageSet imageSet)
+    void update(AbacDsp::SpectrumImageSet imageSet)
     {
         spectrogramImage.update(imageSet);
     }

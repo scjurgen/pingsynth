@@ -29,8 +29,9 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor, public juce::Audi
                              .withOutput("Output", juce::AudioChannelSet::stereo(), true)
 #endif
                              )
-        , fixedRunner([this](const AudioBuffer<2, NumSamplesPerBlock>& input,
-                             AudioBuffer<2, NumSamplesPerBlock>& output) { pluginRunner->processBlock(input, output); })
+        , fixedRunner([this](const AbacDsp::AudioBuffer<2, NumSamplesPerBlock>& input,
+                             AbacDsp::AudioBuffer<2, NumSamplesPerBlock>& output)
+                      { pluginRunner->processBlock(input, output); })
         , m_parameters(*this, nullptr, "PARAMETERS", createParameterLayout())
         , m_avgCpu(8, 0)
         , m_head{0}
@@ -395,7 +396,7 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor, public juce::Audi
     {
         return {m_outputDb[0].load(), m_outputDb[1].load()};
     }
-    [[nodiscard]] SpectrumImageSet getSpectrogram() const
+    [[nodiscard]] AbacDsp::SpectrumImageSet getSpectrogram() const
     {
         return m_spectrogram.getImageSet();
     }
@@ -415,7 +416,7 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor, public juce::Audi
     int m_program{0};
     juce::ValueTree m_newState;
 
-    FixedSizeProcessor<2, NumSamplesPerBlock, juce::AudioBuffer<float>> fixedRunner;
+    AbacDsp::FixedSizeProcessor<2, NumSamplesPerBlock, juce::AudioBuffer<float>> fixedRunner;
     std::unique_ptr<PingSynthExplorerPedal<NumSamplesPerBlock>> pluginRunner;
     juce::AudioProcessorValueTreeState m_parameters;
     // CPU-Load
@@ -428,6 +429,6 @@ class AudioPluginAudioProcessor : public juce::AudioProcessor, public juce::Audi
     std::atomic<float> m_outputDb[2];
     std::array<AbacDsp::RmsFollower, 2> m_envInput;
     std::array<AbacDsp::RmsFollower, 2> m_envOutput;
-    SimpleSpectrogram m_spectrogram;
+    AbacDsp::SimpleSpectrogram m_spectrogram;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioPluginAudioProcessor)
 };

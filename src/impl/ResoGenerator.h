@@ -5,7 +5,7 @@
 #include <memory>
 #include <random>
 
-#include "BiquadBandPass.h"
+#include "../../3rdparty/AbacDsp/src/includes/Filters/BiquadResoBP.h"
 #include "PingExcitation.h"
 
 template <size_t BlockSize, size_t NumElements>
@@ -83,6 +83,7 @@ class ResoGenerator
         {
             out[i] = 0.f;
         }
+
         if (!cntActive)
         {
             return;
@@ -142,6 +143,14 @@ class ResoGenerator
         return m_frequencies;
     }
 
+    void setDampMode(const bool mode)
+    {
+        for (auto& b : m_bq)
+        {
+            b.damp(mode);
+        }
+    }
+
   private:
     void calculatePhaseAdvances() noexcept
     {
@@ -160,7 +169,8 @@ class ResoGenerator
     {
         for (size_t j = 0; j < m_bq.size(); ++j)
         {
-            m_bq[j].setByDecay(m_frequencies[j], 0.02f + m_decay * 10.f);
+            m_bq[j].setByDecay(0, m_frequencies[j], 0.01f + m_decay * 10.f);
+            m_bq[j].setByDecay(1, m_frequencies[j], 0.1f);
         }
     }
 
@@ -168,7 +178,7 @@ class ResoGenerator
 
     void newDecay() noexcept
     {
-        const float centerDecay = 0.02f + m_decay * 10.f;
+        const float centerDecay = 0.02f + m_decay * 30.f;
         // Middle C as reference
         const float centerFreq = 440.f * std::pow(2.f, -9.f / 12.f); // ~261.63 Hz (middle C)
 
@@ -181,7 +191,7 @@ class ResoGenerator
                 const float skewMultiplier = std::pow(2.0f, -m_decaySkew * octaveDistanceFromCenter);
                 adjDecay = centerDecay * skewMultiplier;
             }
-            m_bq[j].setDecay(adjDecay);
+            m_bq[j].setDecay(0, adjDecay);
         }
     }
 
@@ -192,7 +202,7 @@ class ResoGenerator
     size_t cntActive = 0;
 
     std::array<float, NumElements> m_frequencies{};
-    std::array<BiquadBandPass, NumElements> m_bq{};
+    std::array<AbacDsp::BiquadResoBP, NumElements> m_bq{};
     Excitation m_excitation;
     std::array<size_t, NumElements> m_triggerWait{};
     std::array<float, NumElements> m_trigger{};
