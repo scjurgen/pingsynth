@@ -5,7 +5,7 @@
 #include <memory>
 #include <random>
 
-#include "../../3rdparty/AbacDsp/src/includes/Filters/BiquadResoBP.h"
+#include "Filters/BiquadResoBP.h"
 #include "PingExcitation.h"
 
 template <size_t BlockSize, size_t NumElements>
@@ -46,6 +46,8 @@ class ResoGenerator
 
     void triggerNew(size_t index, float power, size_t triggerWaitBlocks)
     {
+        std::cout << index << "\t" << m_frequencies[index] << "\t" << power << std::endl;
+
         m_trigger[index] = static_cast<float>(m_excitation.getPatternLength() - 1);
         m_triggerGain[index] = power * logisticCompensation(m_frequencies[index]);
         m_triggerWait[index] = triggerWaitBlocks;

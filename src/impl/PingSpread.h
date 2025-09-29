@@ -40,7 +40,7 @@ class PingSpread
         float mainF = m_frequencies[index];
         auto nIndex = m_getFrequencyIndex(mainF + f);
         // return 1;
-        return nIndex - index;
+        return 1+nIndex - index;
     }
 
     float getRandomSpread()
@@ -56,10 +56,11 @@ class PingSpread
         {
             return;
         }
-        const size_t beatDelta = beatingIndex(index, 3.f);
+        const size_t beatDelta = beatingIndex(index, 4.f);
         if (m_spread < 0.5f)
         {
-            const auto randomOffset = getRandomSpread();
+            const auto randomOffset = getRandomSpread()*beatDelta*0.5f;
+            std::cout << beatDelta << "\t" << randomOffset << std::endl;
             const auto powerVariation =
                 m_randomPower > 0.0f ? 1.0f + m_getHumanRandomness() * m_randomPower * 0.5f : 1.0f;
             const auto adjustedPower = m_spread * 2 * power * powerVariation;
@@ -69,12 +70,14 @@ class PingSpread
         else
         {
             {
-                const auto randomOffset = getRandomSpread();
+                const auto randomOffset = getRandomSpread()*beatDelta*0.5f;
+            std::cout << beatDelta << "\t" << randomOffset << std::endl;
                 const auto targetIndex = static_cast<size_t>(index + beatDelta + randomOffset);
                 m_triggerCallback(targetIndex, power, 1);
             }
             {
-                const auto randomOffset = getRandomSpread();
+                const auto randomOffset = getRandomSpread()*beatDelta*0.5f;
+                std::cout << beatDelta << "\t" << randomOffset << std::endl;
                 const auto powerVariation =
                     m_randomPower > 0.0f ? 1.0f + m_getHumanRandomness() * m_randomPower * 0.5f : 1.0f;
                 const auto adjustedPower = (m_spread - 0.5f) * 2 * power * powerVariation;

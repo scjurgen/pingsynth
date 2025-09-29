@@ -68,7 +68,7 @@ file(GLOB ImplFiles "src/impl/*.h" "src/impl/*.cpp")
 set(SourceFiles ${IncludeFiles} ${RootFiles} ${ImplFiles})
 list(FILTER SourceFiles EXCLUDE REGEX ".*\\GenericImpl\\.h$")
 
-target_include_directories("${PROJECT_NAME}" PUBLIC 3rdparty/AbacDsp/src/includes)
+target_include_directories("${PROJECT_NAME}" PUBLIC "3rdparty/abacdsp/src/include")
 
 target_sources("${PROJECT_NAME}" PRIVATE ${SourceFiles})
 

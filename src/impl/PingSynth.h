@@ -16,7 +16,7 @@ class PingSynth
     static constexpr int minMidiNote{17};
     static constexpr int maxMidiNote{132};
     static constexpr int range{maxMidiNote - minMidiNote};
-    static constexpr int stepsPerSemitone{33};
+    static constexpr int stepsPerSemitone{66};
 
     static constexpr size_t NumElements{range * (stepsPerSemitone) + 1};
 
@@ -201,6 +201,7 @@ class PingSynth
 
     void triggerVoice(const size_t height, const float velocity) noexcept
     {
+        std::cout << "\n" << height << "\t" << m_frequencies[height] << std::endl;
         if (height < minMidiNote || height > maxMidiNote)
         {
             return;

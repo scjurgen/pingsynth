@@ -43,12 +43,11 @@ class HarmonicGeneratorBase
 
     void triggerHarmonic(const size_t targetIndex, const float overtonePower, const int order) noexcept
     {
-        std::cout << targetIndex << "\t" << overtonePower << std::endl;
-        // if (overtonePower > 0.01f)
+        if (overtonePower > 0.001f)
         {
             m_triggerCallback(targetIndex, overtonePower,
                               static_cast<float>(order) / static_cast<float>(getMaxOvertone()));
-            if (order == 1)
+            if (order < m_overtoneCount.first)
             {
                 m_spreadCallback(targetIndex, overtonePower);
             }
@@ -74,15 +73,19 @@ class HarmonicGeneratorBase
     [[nodiscard]] static float calculateOvertonePower(const float basePower, const float value,
                                                       const float overtonePosition) noexcept
     {
+        float p;
         if (value <= 0.5f)
         {
             const auto decayFactor = 1.0f - overtonePosition;
             const auto blend = value * 2.0f;
-            return basePower * value * (decayFactor * (1.0f - blend) + blend);
+            p= basePower * value * (decayFactor * (1.0f - blend) + blend);
+        }else
+        {
+            const auto increaseFactor = overtonePosition;
+            const auto blend = value * 2.f - 1.f;
+            p= basePower * 0.5f * (1.f - blend + increaseFactor * blend);
         }
-        const auto increaseFactor = overtonePosition;
-        const auto blend = value * 2.f - 1.f;
-        return basePower * 0.5f * (1.f - blend + increaseFactor * blend);
+        return p*p*p;
     }
 };
 
